@@ -1,9 +1,14 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:open_filex/open_filex.dart';
+// Eliminamos OpenFilex ya que usaremos url_launcher y visor de PDF
+// import 'package:open_filex/open_filex.dart'; 
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart'; // Nuevo import
 import '../services/supabase_service.dart';
+import 'dart:io' show Platform; // Importación para detección de plataforma (solo móvil/desktop)
+import 'package:flutter/foundation.dart'; // Importación para kIsWeb
+import 'pdf_viewer_page.dart'; // Importamos la página del visor de PDF
 
 class StudentDocsPage extends StatefulWidget {
   const StudentDocsPage({super.key});
@@ -94,24 +99,47 @@ class _StudentDocsPageState extends State<StudentDocsPage> {
     }
   }
 
-  /// 🔗 Abrir archivo desde URL pública
-  Future<void> openFile(String category, String fileName) async {
+  /// 📄 Navegar al visor de PDF interno (solo para móvil/desktop)
+  void _viewPdf(String url, String fileName) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => PdfViewerPage(
+          pdfUrl: url,
+          fileName: fileName,
+        ),
+      ),
+    );
+  }
+
+  /// 🔗 Función que determina si ver en visor interno o abrir en navegador/descargar
+  Future<void> _handleOpenFile(String category, String fileName) async {
     try {
       final url = await SupabaseService.getFileUrl(category, fileName);
-      final result = await OpenFilex.open(url);
-      if (result.type != ResultType.done && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No se pudo abrir el archivo: ${result.message}')),
-        );
+
+      // Si es un PDF, lo visualizamos internamente, excepto en Web (donde el navegador es mejor).
+      if (fileName.toLowerCase().endsWith('.pdf') && !kIsWeb) {
+        _viewPdf(url, fileName);
+      } 
+      // Si es web o cualquier otro tipo de archivo, abrimos la URL.
+      else {
+        // Usamos LaunchMode.externalApplication para intentar la descarga/apertura nativa
+        if (!await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication)) {
+           if (mounted) {
+             ScaffoldMessenger.of(context).showSnackBar(
+               const SnackBar(content: Text('No se pudo abrir el enlace o iniciar la descarga.')),
+             );
+           }
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al obtener URL: ${e.toString()}')),
+          SnackBar(content: Text('Error al procesar archivo: ${e.toString()}')),
         );
       }
     }
   }
+
 
   /// 🚪 Cerrar sesión
   Future<void> _signOut() async {
@@ -187,7 +215,8 @@ class _StudentDocsPageState extends State<StudentDocsPage> {
                 return CategoryExpansionTile(
                   category: category,
                   files: filesByCategory[category] ?? [],
-                  onOpenFile: openFile,
+                  // Usamos la nueva función _handleOpenFile
+                  onOpenFile: _handleOpenFile, 
                 );
               }).toList(),
             ),
@@ -294,10 +323,12 @@ class FileListItem extends StatelessWidget {
       subtitle: Text('Subido: $formattedDate'),
       trailing: IconButton(
         icon: const Icon(Icons.file_download_outlined, color: Colors.green),
-        onPressed: () => onOpenFile(category, file.name),
+        // Llama a la función de manejo de apertura de archivo
+        onPressed: () => onOpenFile(category, file.name), 
         tooltip: 'Abrir / Descargar Archivo',
       ),
-      onTap: () => onOpenFile(category, file.name),
+      // Llama a la función de manejo de apertura de archivo
+      onTap: () => onOpenFile(category, file.name), 
     );
   }
 }
